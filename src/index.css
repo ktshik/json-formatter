@@ -18,6 +18,15 @@
   }
 }
 
+@layer components {
+  .ind {
+    @apply box-border inline-block border-l border-zinc-200/80 dark:border-zinc-700/60;
+  }
+  .ln {
+    @apply block;
+  }
+}
+
 @layer utilities {
   .scroll-thin::-webkit-scrollbar {
     width: 10px;

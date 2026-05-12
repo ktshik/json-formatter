@@ -4,6 +4,7 @@ import addFormats from 'ajv-formats'
 import { formatJson, parseLineCol, prettyBytes } from './lib/json.js'
 import { useTheme } from './lib/theme.js'
 import { Highlighted } from './components/Highlighted.jsx'
+import { LineNumbers } from './components/LineNumbers.jsx'
 import { ThemeToggle } from './components/ThemeToggle.jsx'
 import { IndentControl } from './components/IndentControl.jsx'
 import { CopyButton } from './components/CopyButton.jsx'
@@ -21,6 +22,9 @@ export default function App() {
   const [indent, setIndent] = useState(2)
   const [schemaOpen, setSchemaOpen] = useState(false)
   const [schemaText, setSchemaText] = useState('')
+  const inputRef = useRef(null)
+  const outputRef = useRef(null)
+  const schemaRef = useRef(null)
 
   const parsed = useMemo(() => {
     if (!input.trim()) return { ok: true, empty: true, value: undefined }
@@ -80,28 +84,33 @@ export default function App() {
     <div className="flex h-full flex-col">
       <Header theme={theme} setTheme={setTheme} />
 
-      <main className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col gap-3 px-4 pb-4 sm:px-6">
-        <div className="grid flex-1 min-h-0 grid-cols-1 gap-3 lg:grid-cols-2">
+      <main className="flex w-full min-h-0 flex-1 flex-col gap-3 overflow-hidden px-4 pb-4 sm:px-6">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
           <Pane
             label="Input"
             actions={
               <button
                 onClick={() => setInput('')}
-                className="text-xs text-zinc-500 transition hover:text-zinc-900 dark:hover:text-zinc-100"
+                disabled={!input}
+                className="font-mono text-xs text-zinc-500 transition hover:text-zinc-900 disabled:opacity-40 disabled:hover:text-zinc-500 dark:hover:text-zinc-100 dark:disabled:hover:text-zinc-500"
               >
-                Clear
+                clear
               </button>
             }
           >
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              spellCheck={false}
-              autoCorrect="off"
-              autoCapitalize="off"
-              placeholder="{}"
-              className="scroll-thin h-full w-full flex-1 resize-none bg-transparent p-4 font-mono text-sm leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-zinc-100 dark:placeholder:text-zinc-600"
-            />
+            <div className="flex min-h-0 flex-1">
+              <LineNumbers count={input.split('\n').length} scrollRef={inputRef} />
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                spellCheck={false}
+                autoCorrect="off"
+                autoCapitalize="off"
+                placeholder="{}"
+                className="scroll-thin h-full w-full flex-1 resize-none bg-transparent p-4 font-mono text-sm leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-zinc-100 dark:placeholder:text-zinc-600"
+              />
+            </div>
             {!parsed.ok && !parsed.empty && (
               <ErrorBar message={parsed.error} pos={parsed.pos} />
             )}
@@ -117,7 +126,10 @@ export default function App() {
             }
           >
             {output ? (
-              <Highlighted code={output} />
+              <div className="flex min-h-0 flex-1">
+                <LineNumbers count={output.split('\n').length} scrollRef={outputRef} />
+                <Highlighted code={output} indent={indent} scrollRef={outputRef} />
+              </div>
             ) : (
               <Placeholder>
                 {parsed.empty ? 'Output appears here' : 'Fix errors to see output'}
@@ -133,6 +145,7 @@ export default function App() {
           setSchemaText={setSchemaText}
           schemaParsed={schemaParsed}
           validation={validation}
+          schemaRef={schemaRef}
         />
 
         <StatusBar status={status} stats={stats} />
@@ -143,7 +156,7 @@ export default function App() {
 
 function Header({ theme, setTheme }) {
   return (
-    <header className="mx-auto flex w-full max-w-[1400px] items-center justify-between px-4 py-5 sm:px-6">
+    <header className="flex w-full items-center justify-between px-4 py-5 sm:px-6">
       <h1 className="font-mono text-base font-medium tracking-tight text-zinc-900 dark:text-zinc-100">
         json
       </h1>
@@ -154,14 +167,14 @@ function Header({ theme, setTheme }) {
 
 function Pane({ label, actions, children }) {
   return (
-    <section className="flex min-h-[40vh] flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 lg:min-h-0">
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
       <header className="flex h-11 shrink-0 items-center justify-between border-b border-zinc-200 px-4 dark:border-zinc-800">
         <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">
           {label}
         </span>
         {actions}
       </header>
-      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="relative flex min-h-0 flex-1 cursor-text flex-col overflow-hidden">
         {children}
       </div>
     </section>
@@ -185,11 +198,10 @@ function ErrorBar({ message, pos }) {
   )
 }
 
-function SchemaSection({ open, onToggle, schemaText, setSchemaText, schemaParsed, validation }) {
-  const ref = useRef(null)
+function SchemaSection({ open, onToggle, schemaText, setSchemaText, schemaParsed, validation, schemaRef }) {
   useEffect(() => {
-    if (open && ref.current) ref.current.focus()
-  }, [open])
+    if (open && schemaRef.current) schemaRef.current.focus()
+  }, [open, schemaRef])
 
   return (
     <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
@@ -222,15 +234,18 @@ function SchemaSection({ open, onToggle, schemaText, setSchemaText, schemaParsed
       </button>
       {open && (
         <div className="grid grid-cols-1 border-t border-zinc-200 lg:grid-cols-2 dark:border-zinc-800">
-          <textarea
-            ref={ref}
-            value={schemaText}
-            onChange={(e) => setSchemaText(e.target.value)}
-            spellCheck={false}
-            autoCorrect="off"
-            placeholder={'{\n  "type": "object",\n  "required": ["name"],\n  "properties": {\n    "name": { "type": "string" }\n  }\n}'}
-            className="scroll-thin h-56 w-full resize-none border-b border-zinc-200 bg-transparent p-4 font-mono text-sm leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:border-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-600 lg:border-b-0 lg:border-r"
-          />
+          <div className="flex h-56 border-b border-zinc-200 dark:border-zinc-800 lg:border-b-0 lg:border-r">
+            <LineNumbers count={schemaText.split('\n').length} scrollRef={schemaRef} />
+            <textarea
+              ref={schemaRef}
+              value={schemaText}
+              onChange={(e) => setSchemaText(e.target.value)}
+              spellCheck={false}
+              autoCorrect="off"
+              placeholder={'{\n  "type": "object",\n  "required": ["name"],\n  "properties": {\n    "name": { "type": "string" }\n  }\n}'}
+              className="scroll-thin h-full w-full resize-none bg-transparent p-4 font-mono text-sm leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-zinc-100 dark:placeholder:text-zinc-600"
+            />
+          </div>
           <div className="scroll-thin h-56 overflow-auto p-4 font-mono text-xs">
             {!schemaText.trim() ? (
               <p className="text-zinc-400 dark:text-zinc-600">
