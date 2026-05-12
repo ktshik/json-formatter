@@ -1,7 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Ajv from 'ajv'
 import addFormats from 'ajv-formats'
-import { formatJson, parseLineCol, prettyBytes } from './lib/json.js'
+import {
+  caretFromIndex,
+  computeFolds,
+  formatJson,
+  getVisibleLineIndices,
+  parseLineCol,
+  prettyBytes,
+} from './lib/json.js'
 import { useTheme } from './lib/theme.js'
 import { Highlighted } from './components/Highlighted.jsx'
 import { LineNumbers } from './components/LineNumbers.jsx'
@@ -22,6 +29,8 @@ export default function App() {
   const [indent, setIndent] = useState(2)
   const [schemaOpen, setSchemaOpen] = useState(false)
   const [schemaText, setSchemaText] = useState('')
+  const [caret, setCaret] = useState({ line: 1, col: 1 })
+  const [folded, setFolded] = useState(() => new Set())
   const inputRef = useRef(null)
   const outputRef = useRef(null)
   const schemaRef = useRef(null)
@@ -39,6 +48,29 @@ export default function App() {
     if (!parsed.ok || parsed.empty) return ''
     return formatJson(parsed.value, indent)
   }, [parsed, indent])
+
+  const outputLines = useMemo(() => (output ? output.split('\n') : []), [output])
+  const folds = useMemo(() => computeFolds(outputLines), [outputLines])
+
+  useEffect(() => {
+    setFolded(new Set())
+  }, [output])
+
+  const visible = useMemo(
+    () => getVisibleLineIndices(outputLines.length, folds, folded),
+    [outputLines, folds, folded],
+  )
+
+  const visibleNumbers = useMemo(() => visible.map((i) => i + 1), [visible])
+
+  const toggleFold = useCallback((lineIdx) => {
+    setFolded((prev) => {
+      const next = new Set(prev)
+      if (next.has(lineIdx)) next.delete(lineIdx)
+      else next.add(lineIdx)
+      return next
+    })
+  }, [])
 
   const schemaParsed = useMemo(() => {
     if (!schemaOpen || !schemaText.trim()) return null
@@ -71,14 +103,50 @@ export default function App() {
   const status = parsed.empty
     ? { tone: 'idle', text: 'Paste or type JSON' }
     : !parsed.ok
-      ? { tone: 'error', text: parsed.error }
+      ? { tone: 'error', text: 'Invalid JSON' }
       : validation
         ? validation.compileError
-          ? { tone: 'error', text: `Schema: ${validation.compileError}` }
+          ? { tone: 'error', text: 'Invalid schema' }
           : validation.valid
             ? { tone: 'ok', text: 'Valid against schema' }
-            : { tone: 'error', text: `${validation.errors.length} schema issue${validation.errors.length === 1 ? '' : 's'}` }
+            : {
+                tone: 'error',
+                text: `${validation.errors.length} schema issue${
+                  validation.errors.length === 1 ? '' : 's'
+                }`,
+              }
         : { tone: 'ok', text: 'Valid JSON' }
+
+  const updateCaret = useCallback((e) => {
+    const ta = e.currentTarget
+    setCaret(caretFromIndex(ta.value, ta.selectionStart))
+  }, [])
+
+  const focusInput = useCallback((e) => {
+    if (e.target === inputRef.current) return
+    e.preventDefault()
+    inputRef.current?.focus()
+  }, [])
+
+  const focusOutput = useCallback((e) => {
+    if (e.target === outputRef.current) return
+    if (outputRef.current?.contains(e.target)) return
+    e.preventDefault()
+    outputRef.current?.focus()
+  }, [])
+
+  const onOutputKeyDown = useCallback((e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+      e.preventDefault()
+      const pre = outputRef.current
+      if (!pre) return
+      const sel = window.getSelection()
+      const range = document.createRange()
+      range.selectNodeContents(pre)
+      sel.removeAllRanges()
+      sel.addRange(range)
+    }
+  }, [])
 
   return (
     <div className="flex h-full flex-col">
@@ -98,12 +166,16 @@ export default function App() {
               </button>
             }
           >
-            <div className="flex min-h-0 flex-1">
+            <div className="flex min-h-0 flex-1" onMouseDown={focusInput}>
               <LineNumbers count={input.split('\n').length} scrollRef={inputRef} />
               <textarea
                 ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                onSelect={updateCaret}
+                onKeyUp={updateCaret}
+                onClick={updateCaret}
+                onFocus={updateCaret}
                 spellCheck={false}
                 autoCorrect="off"
                 autoCapitalize="off"
@@ -126,9 +198,24 @@ export default function App() {
             }
           >
             {output ? (
-              <div className="flex min-h-0 flex-1">
-                <LineNumbers count={output.split('\n').length} scrollRef={outputRef} />
-                <Highlighted code={output} indent={indent} scrollRef={outputRef} />
+              <div className="flex min-h-0 flex-1" onMouseDown={focusOutput}>
+                <LineNumbers
+                  numbers={visibleNumbers}
+                  folds={folds}
+                  folded={folded}
+                  onToggleFold={toggleFold}
+                  scrollRef={outputRef}
+                />
+                <Highlighted
+                  lines={outputLines}
+                  visible={visible}
+                  indent={indent}
+                  folded={folded}
+                  folds={folds}
+                  scrollRef={outputRef}
+                  tabIndex={0}
+                  onKeyDown={onOutputKeyDown}
+                />
               </div>
             ) : (
               <Placeholder>
@@ -148,7 +235,7 @@ export default function App() {
           schemaRef={schemaRef}
         />
 
-        <StatusBar status={status} stats={stats} />
+        <StatusBar status={status} stats={stats} caret={caret} />
       </main>
     </div>
   )
@@ -203,6 +290,15 @@ function SchemaSection({ open, onToggle, schemaText, setSchemaText, schemaParsed
     if (open && schemaRef.current) schemaRef.current.focus()
   }, [open, schemaRef])
 
+  const focusSchema = useCallback(
+    (e) => {
+      if (e.target === schemaRef.current) return
+      e.preventDefault()
+      schemaRef.current?.focus()
+    },
+    [schemaRef],
+  )
+
   return (
     <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
       <button
@@ -228,13 +324,18 @@ function SchemaSection({ open, onToggle, schemaText, setSchemaText, schemaParsed
                 : 'font-mono text-xs text-rose-600 dark:text-rose-400'
             }
           >
-            {validation.valid ? '✓ valid' : `✗ ${validation.errors.length} issue${validation.errors.length === 1 ? '' : 's'}`}
+            {validation.valid
+              ? '✓ valid'
+              : `✗ ${validation.errors.length} issue${validation.errors.length === 1 ? '' : 's'}`}
           </span>
         )}
       </button>
       {open && (
         <div className="grid grid-cols-1 border-t border-zinc-200 lg:grid-cols-2 dark:border-zinc-800">
-          <div className="flex h-56 border-b border-zinc-200 dark:border-zinc-800 lg:border-b-0 lg:border-r">
+          <div
+            className="flex h-56 cursor-text border-b border-zinc-200 dark:border-zinc-800 lg:border-b-0 lg:border-r"
+            onMouseDown={focusSchema}
+          >
             <LineNumbers count={schemaText.split('\n').length} scrollRef={schemaRef} />
             <textarea
               ref={schemaRef}
@@ -281,7 +382,7 @@ function SchemaSection({ open, onToggle, schemaText, setSchemaText, schemaParsed
   )
 }
 
-function StatusBar({ status, stats }) {
+function StatusBar({ status, stats, caret }) {
   const tone = {
     ok: 'text-emerald-600 dark:text-emerald-400',
     error: 'text-rose-600 dark:text-rose-400',
@@ -290,11 +391,18 @@ function StatusBar({ status, stats }) {
   return (
     <footer className="flex items-center justify-between px-1 font-mono text-xs text-zinc-500">
       <span className={tone}>{status.text}</span>
-      {stats && (
-        <span className="tabular-nums">
-          {stats.lines} lines · {prettyBytes(stats.bytes)}
-        </span>
-      )}
+      <div className="flex items-center gap-4">
+        {caret && (
+          <span className="tabular-nums">
+            L{caret.line}:{caret.col}
+          </span>
+        )}
+        {stats && (
+          <span className="tabular-nums">
+            {stats.lines} lines · {prettyBytes(stats.bytes)}
+          </span>
+        )}
+      </div>
     </footer>
   )
 }

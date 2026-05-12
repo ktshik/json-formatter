@@ -28,35 +28,50 @@ function highlightLine(src) {
   return out || '​'
 }
 
-function render(src, indent) {
-  if (indent <= 0) return highlightLine(src)
-  const lines = src.split('\n')
-  return lines
-    .map((line) => {
-      const lead = line.match(/^( *)/)[0]
-      const rest = line.slice(lead.length)
-      const levels = Math.floor(lead.length / indent)
-      const extra = lead.length - levels * indent
-      let guides = ''
-      for (let i = 0; i < levels; i++) {
-        guides += `<span class="ind" style="width:${indent}ch">${' '.repeat(indent)}</span>`
-      }
-      if (extra > 0) guides += ' '.repeat(extra)
-      return `<div class="ln">${guides}${highlightLine(rest)}</div>`
-    })
-    .join('')
+function renderLineHtml(line, indent, foldedClose) {
+  if (indent <= 0) return highlightLine(line)
+  const lead = line.match(/^( *)/)[0]
+  const rest = line.slice(lead.length)
+  const levels = Math.floor(lead.length / indent)
+  const extra = lead.length - levels * indent
+  let guides = ''
+  for (let i = 0; i < levels; i++) {
+    guides += `<span class="ind" style="width:${indent}ch">${' '.repeat(indent)}</span>`
+  }
+  if (extra > 0) guides += ' '.repeat(extra)
+  let content = highlightLine(rest)
+  if (foldedClose) {
+    content += ` <span class="fold-mark">…</span> <span class="tk-punct">${foldedClose}</span>`
+  }
+  return `<div class="ln">${guides}${content}</div>`
 }
 
-export function Highlighted({ code, indent, scrollRef }) {
-  const html = useMemo(() => render(code, indent), [code, indent])
+function render(lines, visible, indent, folded, folds) {
+  if (indent <= 0) return highlightLine(lines.join(''))
+  const out = new Array(visible.length)
+  for (let k = 0; k < visible.length; k++) {
+    const i = visible[k]
+    const close = folded.has(i) ? folds.get(i)?.close : null
+    out[k] = renderLineHtml(lines[i] ?? '', indent, close)
+  }
+  return out.join('')
+}
+
+export function Highlighted({ lines, visible, indent, folded, folds, scrollRef, onKeyDown, tabIndex }) {
+  const html = useMemo(
+    () => render(lines, visible, indent, folded, folds),
+    [lines, visible, indent, folded, folds],
+  )
   return (
     <pre
       ref={scrollRef}
-      className="scroll-thin m-0 h-full w-full flex-1 overflow-auto whitespace-pre p-4 font-mono text-sm leading-relaxed"
+      tabIndex={tabIndex}
+      onKeyDown={onKeyDown}
+      className="scroll-thin m-0 h-full w-full flex-1 overflow-auto whitespace-pre p-4 font-mono text-sm leading-relaxed focus:outline-none"
       style={{ tabSize: indent || 2 }}
     >
       <code
-        className="[&_.tk-key]:text-zinc-900 [&_.tk-key]:dark:text-zinc-100 [&_.tk-str]:text-emerald-700 [&_.tk-str]:dark:text-emerald-400 [&_.tk-num]:text-amber-700 [&_.tk-num]:dark:text-amber-400 [&_.tk-bool]:text-violet-700 [&_.tk-bool]:dark:text-violet-400 [&_.tk-null]:text-rose-600 [&_.tk-null]:dark:text-rose-400 [&_.tk-punct]:text-zinc-400 [&_.tk-punct]:dark:text-zinc-500 text-zinc-600 dark:text-zinc-400"
+        className="[&_.tk-key]:text-zinc-900 [&_.tk-key]:dark:text-zinc-100 [&_.tk-str]:text-emerald-700 [&_.tk-str]:dark:text-emerald-400 [&_.tk-num]:text-amber-700 [&_.tk-num]:dark:text-amber-400 [&_.tk-bool]:text-violet-700 [&_.tk-bool]:dark:text-violet-400 [&_.tk-null]:text-rose-600 [&_.tk-null]:dark:text-rose-400 [&_.tk-punct]:text-zinc-400 [&_.tk-punct]:dark:text-zinc-500 [&_.fold-mark]:text-zinc-400 [&_.fold-mark]:dark:text-zinc-500 text-zinc-600 dark:text-zinc-400"
         dangerouslySetInnerHTML={{ __html: html }}
       />
     </pre>
